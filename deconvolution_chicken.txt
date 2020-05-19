@@ -1,0 +1,116 @@
+require(plyr)
+
+batches = paste("AB", c(3013,5658), sep="")
+umidir = "./chicken_SC_in"
+clusteringdir = "./chicken_SC_in"
+non_microglia_clusters <- c(1:13)
+microglia_clusters <- c(14:22)
+file_in <- "./chicken_bulk_in/chicken_exons_gal5_raw.txt"
+file_out <- "chicken_exons_gal5_raw_cleaned.txt"
+
+#######################################
+
+.read.scdbtab=function(amp_batches, scdb_path=".")
+{
+  files=paste(scdb_path,"/",amp_batches,".txt",sep="")
+  l=lapply(files,FUN=function(x){read.delim(x,header=T,check.names=F,stringsAsFactors=F,row.names=1)})
+  a=do.call("cbind", l)
+  return(a)
+}
+
+umis_all = .read.scdbtab(batches, scdb_path = umidir)
+map <- read.delim(file=paste(clusteringdir,"/","map.txt",sep=""), header=T)
+umis_all <- umis_all[,colnames(umis_all) %in% rownames(map)]
+
+#assume noise
+sumOfGenes <- rowSums(umis_all)
+numOfCells <- length(map$x)
+sumOfGenesNoise <- sumOfGenes*0.1/numOfCells
+
+SCclusters_n <- length(unique(map$x))
+SCclusters <- data.frame(rownames(umis_all))
+rownames(SCclusters) <- rownames(umis_all)
+for (i in 1:SCclusters_n)
+{
+	clustersize <- length(map[map$x == i,1])
+	if (clustersize == 1)
+	{
+		a <- umis_all[,colnames(umis_all) %in% rownames(map[map$x == i,,drop=F])]-sumOfGenesNoise
+		a[a<0]<-0
+		SCclusters <- cbind(SCclusters,a)
+		colnames(SCclusters)[length(colnames(SCclusters))] <- paste("Cluster",i,sep="")
+	}
+	else
+	{
+		a <- rowSums(umis_all[,colnames(umis_all) %in% rownames(map[map$x == i,,drop=F])])-sumOfGenesNoise*clustersize
+		a[a<0]<-0
+		SCclusters <- cbind(SCclusters,a)
+		colnames(SCclusters)[length(colnames(SCclusters))] <- paste("Cluster",i,sep="")
+	}
+}
+SCclusters <- SCclusters[,-1]
+
+SCclusters_o <- data.frame(rownames(umis_all))
+rownames(SCclusters_o) <- rownames(umis_all)
+for (i in 1:SCclusters_n)
+{
+	clustersize <- length(map[map$x == i,1])
+	if (clustersize == 1)
+	{
+		SCclusters_o <- cbind(SCclusters_o,umis_all[,colnames(umis_all) %in% rownames(map[map$x == i,,drop=F])])
+		colnames(SCclusters_o)[length(colnames(SCclusters_o))] <- paste("Cluster",i,sep="")
+	}
+	else
+	{
+		SCclusters_o <- cbind(SCclusters_o,rowSums(umis_all[,colnames(umis_all) %in% rownames(map[map$x == i,,drop=F])]))
+		colnames(SCclusters_o)[length(colnames(SCclusters_o))] <- paste("Cluster",i,sep="")
+	}
+}
+SCclusters_o <- SCclusters_o[,-1]
+
+
+bulk <- read.table(file=file_in, sep="\t", header=T, stringsAsFactors=F, row.names = 1)
+bulk <- bulk[,-c(1:8),drop=F]
+
+SC_n = length(colnames(SCclusters))
+SCclusters = SCclusters[-c(grep("ERCC",rownames(SCclusters))),]
+SCclusters_o = SCclusters_o[-c(grep("ERCC",rownames(SCclusters_o))),]
+B_n = length(colnames(bulk))
+bulkin <- paste("B",1:B_n,sep="") 
+clustersin <- paste("C",1:SC_n,sep="") 
+Bulkout <- paste("Bo",1:B_n,sep="") 
+#
+#create table for results
+#
+SCB_all <- merge(x = bulk, y = SCclusters, by = 0, all.x = TRUE)
+SCB_all[is.na(SCB_all)] <- 0
+rownames(SCB_all) <- SCB_all$Row.names
+SCB_all <- SCB_all[,-1]
+SCB_all <- cbind(SCB_all,SCB_all[,1:length(colnames(bulk))])
+colnames(SCB_all) <- c(bulkin,clustersin,Bulkout)
+SCB_all_o <- merge(x = bulk, y = SCclusters_o, by = 0, all.x = TRUE)
+SCB_all_o[is.na(SCB_all_o)] <- 0
+rownames(SCB_all_o) <- SCB_all_o$Row.names
+SCB_all_o <- SCB_all_o[,-1]
+SCB_all_o <- cbind(SCB_all_o,SCB_all_o[,1:length(colnames(bulk))])
+colnames(SCB_all_o) <- c(bulkin,clustersin,Bulkout)
+
+for (mcol in 1:length(bulkin))
+{
+	fr <- function(x) {
+		sum((SCB_all[,mcol]-x %*% t(as.matrix(SCB_all[,(length(bulkin)+1):(length(bulkin)+length(clustersin))])))**2)
+	}
+	res <- optim(rep(1,length(clustersin)), fr, lower=rep(0,length(clustersin)), method="L-BFGS-B")
+	for (i in 1:length(non_microglia_clusters))
+	{
+		SCB_all_o[,Bulkout[mcol]] <- SCB_all_o[,Bulkout[mcol]] - SCB_all_o[,clustersin[non_microglia_clusters[i]]]*res$par[non_microglia_clusters[i]]
+		print(Bulkout[mcol])
+		print(non_microglia_clusters[i])
+		print(res$par[non_microglia_clusters[i]])
+		print(sum(SCB_all_o[,Bulkout[mcol]]*res$par[non_microglia_clusters[i]]))
+	}
+}
+SCB_all_o[SCB_all_o < 0] <- 0
+
+write.table(file=file_out, SCB_all_o[,Bulkout], sep="\t", quote = F)
+
