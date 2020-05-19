@@ -7,5 +7,5 @@ Each bulk sample can be described as a linear combination of all the cell types 
 
 Executing the R code in deconvolution_chicken.txt will create the deconvoluted bulk file used in the paper (Authors: Geirsdottir et al. Cell 2019).
 
-The script reads bulk data in folder: XXXX and scRNA-seq data in folder: XXXX and uses the scRNA-seq data to clean and deconvolute the bulk data. The modified bulk file is saved under: XXXXX
+The script reads bulk data in folder: .\chicken_bulk_in\ and scRNA-seq data in folder: .\chicken_SC_in\ and uses the scRNA-seq data to clean and deconvolute the bulk data. The modified bulk file is saved under: .\chicken_exons_gal5_raw_cleaned.txt
 
